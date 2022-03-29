@@ -19,27 +19,592 @@ library(mgcv)
 library(viridis)
 library(gridExtra)
 library(knitr)
+library('rgdal')
+#install.packages("proj4")
+library('proj4')
+library('spdep')
+
 
 ```
 
 
 
-## R Markdown
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+## Load data
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
 
-```{r cars}
-summary(cars)
+dat<- st_read(dsn = "Shapefiles", 
+                layer = "CES4 Final Shapefile", geometry_column = "geometry", quiet = TRUE)
+
+#replace -999 with NA
+dat<- dat %>% 
+  mutate_if(is.numeric, ~na_if(., -999))
+
+#summary(dat)
+
+dat.dw<- read_csv("ces20drinkingwaterresultsbycontaminant.csv")
+
+#convert to numeric
+dat.dw[,6:31]<- apply(dat.dw[,6:31], 2, as.numeric)
+
+
+#colnames(dat)
+#colnames(dat.dw)
+
+dat_merge<- dat %>% full_join(dat.dw[,c(1,6:31)], by=c("Tract"="Census Tract"))
+
+dat_merge<- dat_merge %>% mutate(Uranium= 1.5*Uranium)
+
+dat_merge_sf<- dat_merge
+
+#drop geometry for summarizing bc it sometimes produces an error
+dat_merge<- dat_merge %>% st_drop_geometry()
+
+#dat_merge<- dat_merge %>% rename(Lead_water=Lead.y, Lead_house= Lead.x)
+
 ```
 
-## Including Plots
+## Appendix: distribution of exposures 
 
-You can also embed plots, for example:
+```{r}
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+
+df_melt<- dat_merge %>%
+  dplyr::select(Tract, Ozone, PM2_5, DieselPM, Tox_Rel, Traffic, 
+                Arsenic, Uranium, Cadmium, Lead.y, 
+                Hispanic,White,AfricanAm,NativeAm,OtherMult, Cardiovas, 
+                Educatn,Poverty,Unempl,HousBurd) %>% gather("key", "value", -Tract)
+#dat_merge$HousBurd  
+
+DistrTabl<- df_melt %>% group_by(key) %>% summarise(N=n(), 
+                                           N_NA= sum(is.na(value)), 
+                                           Min= min(value, na.rm = TRUE),
+                                           Q1= quantile(value, 0.25, na.rm = TRUE), 
+                                           Median= quantile(value,0.5, na.rm = TRUE),
+                                           Mean= mean(value, na.rm = TRUE),
+                                           Q3= quantile(value, 0.75,na.rm = TRUE),
+                                           Max= max(value, na.rm = TRUE)) %>% 
+  mutate_if(is.numeric, round, 3)
+
+
+
+
+write_csv(DistrTabl, file = "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/DistrTbl.csv")
+
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+## Appendix: correlation 
+
+```{r}
+
+APcovars<- dat_merge %>% dplyr::select(Ozone, PM2_5, DieselPM, Tox_Rel, Traffic, Arsenic, Uranium)
+
+corAPcovars<- cor(APcovars,use="complete.obs",method = "spearman")
+
+
+png(height=500, width=500, file="C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/AirCorplot.png", type = "cairo")
+
+corrplot.mixed(corAPcovars, lower.col = "black", tl.cex = 1)
+
+
+dev.off()
+
+
+
+
+Watercovars<- dat_merge %>% dplyr::select(Arsenic, Uranium, Cadmium, Lead.y)
+
+corWatercovars<- cor(Watercovars,use="complete.obs",method = "spearman")
+
+
+
+png(height=400, width=400, file="C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/WaterCorplot.png", type = "cairo")
+
+corrplot.mixed(corWatercovars, lower.col = "black", tl.cex = 1)
+
+
+dev.off()
+
+```
+
+## Models 
+
+
+
+
+```{r,  echo=FALSE, eval=FALSE, include=FALSE}
+
+
+### CVD 
+
+
+#+Hispanic+White+AfricanAm+NativeAm+OtherMult (add in if want to adjust for race/eth)
+
+vars<- c("Arsenic", "Uranium",  "Ozone", "PM2_5", "DieselPM", "Tox_Rel", "Traffic", "EducatP","PovertyP","UnemplP","HousBurdP", 
+         "Hispanic","White","AfricanAm","NativeAm","OtherMult",
+         "Cardiovas")
+dat_merge <- dat_merge[complete.cases(dat_merge[ , vars]), ] 
+
+dat_merge_sf<- dat_merge_sf %>% filter(Tract %in% dat_merge$Tract)
+
+
+#Water exposures
+
+
+dat_merge_sf<- dat_merge_sf %>% mutate(Asln=ifelse(Arsenic==0, log(0.01), log(Arsenic)), 
+                                       Uln=ifelse(Uranium==0, log(0.01), log(Uranium)))
+
+
+
+dat_merge<- dat_merge %>% mutate(Asln=ifelse(Arsenic==0, log(0.01), log(Arsenic)), 
+                                       Uln=ifelse(Uranium==0, log(0.01), log(Uranium)))
+
+
+WaterExp<- c("Arsenic", "Uranium")
+WaterExpln<- c("Asln", "Uln")
+
+
+
+WaterMod <- lapply(WaterExp, function(i) {
+      # STRING INTERPOLATION WITH sprintf, THEN CONVERTED TO FORMULA OBJECT
+      iformula <- as.formula(sprintf("Cardiovas~s(%s)+log(PM2_5)+
+                                     EducatP+PovertyP+UnemplP+HousBurdP+
+                                     Hispanic+White+AfricanAm+NativeAm+OtherMult", i))  
+      gam(iformula, data=dat_merge_sf, family = "quasipoisson") 
+  
+ 
+})
+
+
+plot.gam(WaterMod[[1]])
+abline(h=0)
+plot.gam(WaterMod[[2]])
+abline(h=0)
+#plot.gam(WaterMod[[3]])
+#abline(h=0)
+#plot.gam(WaterMod[[4]])
+#abline(h=0)
+#plot.gam(WaterMod[[5]])
+#abline(h=0)
+
+
+fit.y<- c("fit.s.Arsenic.", "fit.s.Uranium.")
+se.y<- c("se.fit.s.Arsenic.", "se.fit.s.Uranium.")
+lim<- c(25,40)
+Waterlab<- c(expression(paste("Arsenic", " (", mu, "g/L", ")")), expression(paste("Uranium", " (", mu, "g/L", ")")))
+lineRR<- c(10,20)
+txt.x<- c(8.4, 18.4)
+txt.y<- c(1.3, 1.3)
+txt<- c("RR= 1.16\n(1.10, 1.23)", "RR= 1.10\n(1.02, 1.17)")
+
+
+Waterplot<- list()
+
+for (i in 1:length(WaterMod)) {
+  pred <- predict(WaterMod[[i]], se.fit = TRUE, type = "terms" )
+  pred <- as.data.frame(pred)
+  pred<- cbind(pred, x=dat_merge[,WaterExp[i]])
+  pred<- pred %>% 
+  select(fit.y[i], se.y[i], x) %>% 
+  rename(y=fit.y[i], se=se.y[i])
+  pred<- pred %>%  
+  mutate(ll= y-1.96*se, 
+         ul= y+1.96*se) %>% 
+  mutate(y= exp(y), ll=exp(ll), ul= exp(ul))
+  Waterplot[[i]]<- ggplot(pred, aes(x=x, y=y))+geom_line(aes(y = y), color = "blue") + 
+  geom_line(aes(y = ll), color = "darkgrey") + 
+  geom_line(aes(y = ul), color = "darkgrey")+
+  geom_hline(yintercept =1)+
+  scale_x_continuous(limits = c(0, lim[i]))+
+  geom_rug(sides = "b")+
+    scale_y_continuous(breaks=c(0.8,0.9,1,1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4), limits=c(0.8,1.4))+xlab(Waterlab[i])+ylab("")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+  
+} 
+
+
+Waterplot[[1]]<- Waterplot[[1]]+geom_vline(xintercept =lineRR[1], linetype="dashed")+
+  geom_text(aes(x=5, y=txt.y[1]), label=txt[1], size=3)
+Waterplot[[2]]  <- Waterplot[[2]]+geom_vline(xintercept =lineRR[2], linetype="dashed")+
+  geom_text(aes(x=15, y=txt.y[2]), label=txt[2], size=3)
+
+
+Waterplot[[1]]
+Waterplot[[2]]
+
+
+
+
+
+
+
+
+#Air pollution (and housing lead)
+
+
+dat_merge_sf<- dat_merge_sf %>% rename(DW_scoreP=`Drinking Water Score
+Pctl`)
+
+APExp<- c("Ozone", "PM2_5",  "DieselPM", "Tox_Rel", "Traffic")
+
+
+APMod <- lapply(APExp, function(i) {
+      # STRING INTERPOLATION WITH sprintf, THEN CONVERTED TO FORMULA OBJECT
+      iformula <- as.formula(sprintf("Cardiovas~s(%s)+DW_scoreP+
+                                     EducatP+PovertyP+UnemplP+HousBurdP+
+                                     Hispanic+White+AfricanAm+NativeAm+OtherMult", i))  
+      gam(iformula, data=dat_merge_sf,  family = "quasipoisson") 
+  
+ 
+})
+
+
+
+plot.gam(APMod[[1]])
+abline(h=0)
+plot.gam(APMod[[2]])
+abline(h=0)
+plot.gam(APMod[[3]])
+abline(h=0)
+plot.gam(APMod[[4]])
+abline(h=0)
+plot.gam(APMod[[5]])
+abline(h=0)
+#plot.gam(APMod[[6]])
+#abline(h=0)
+
+fit.y<- paste0("fit.s.", APExp, ".")
+se.y<- paste0("se.fit.s.", APExp, ".")
+
+lim<- c(0.073,16.4, 3, 40000, 1000, 100)
+lim.min= c(0.027, 1.88, 0, 0, 0)
+
+APlab<- c("Ozone (ppm)", expression(paste(PM[2.5], " (", mu, "g/", m^3, ")")),  "Diesel PM (tons/yr)", "Toxic Releases (toxicity-weighted concentration)", "Traffic (density)")
+
+
+APplot<- list()
+
+for (i in 1:length(APMod)) {
+  pred <- predict(APMod[[i]], se.fit = TRUE, type = "terms" )
+  pred <- as.data.frame(pred)
+  pred<- cbind(pred, x=dat_merge[,APExp[i]])
+  pred<- pred %>% 
+  select(fit.y[i], se.y[i], x) %>% 
+  rename(y=fit.y[i], se=se.y[i])
+  pred<- pred %>%  
+  mutate(ll= y-1.96*se, 
+         ul= y+1.96*se) %>% 
+  mutate(y= exp(y), ll=exp(ll), ul= exp(ul))
+  APplot[[i]]<- ggplot(pred, aes(x=x, y=y))+geom_line(aes(y = y), color = "red") + 
+  geom_line(aes(y = ll), color = "darkgrey") + 
+  geom_line(aes(y = ul), color = "darkgrey")+
+  geom_hline(yintercept =1)+scale_x_continuous( limits = c(lim.min[i],lim[i]))+
+  geom_rug(sides = "b")+
+    scale_y_continuous(breaks=c(0.8,0.9,1,1.05, 1.1, 1.15, 1.2, 1.25, 1.3, 1.35, 1.4), limits=c(0.8,1.4))+xlab(APlab[i])+ylab("")+
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.background = element_blank(), axis.line = element_line(colour = "black"))
+
+
+  
+} 
+
+APplot[[1]]  
+APplot[[2]]  
+APplot[[3]]
+APplot[[4]]
+APplot[[5]]
+
+
+
+
+
+APplot[[1]]<- APplot[[1]]+geom_vline(xintercept =0.07, linetype="dashed")+
+  geom_text(aes(x=0.06, y=1.3), label="RR= 1.15\n(1.12, 1.18)", size=3)
+APplot[[2]]  <- APplot[[2]]+geom_vline(xintercept =16, linetype="dashed")+
+  geom_text(aes(x=12, y=1.3), label="RR= 1.12\n(1.04, 1.19)", size=3)
+APplot[[4]]  <- APplot[[4]]+geom_vline(xintercept =15000, linetype="dashed")+
+  geom_text(aes(x=8000, y=1.3), label="RR= 1.16\n(1.10, 1.22)", size=3)
+
+
+
+APplot[[1]]
+APplot[[2]]
+
+
+
+library(ggpubr)
+
+multi<- ggarrange( Waterplot[[1]], Waterplot[[2]],APplot[[1]],APplot[[2]], APplot[[3]],APplot[[5]],APplot[[4]],
+          ncol = 2, nrow = 4)+
+  theme(plot.margin = margin(0.4,0.1,0.1,0.1, "cm"))
+multi <- annotate_figure(multi, fig.lab = "Rate Ratio for Cardiovascular disease",
+                         fig.lab.pos = "top.left", fig.lab.size = 11,
+                         fig.lab.face = "bold")
+multi
+
+
+ggsave(Waterplot[[1]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/As.png", 
+       width = 5,
+  height = 3, units = "in")
+
+ggsave(Waterplot[[2]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/U.png", 
+       width = 5,
+  height = 3, units = "in")
+
+
+ggsave(APplot[[1]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/Ozone.png", 
+       width = 5,
+  height = 3, units = "in")
+
+
+ggsave(APplot[[2]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/PM.png", 
+       width = 5,
+  height = 3, units = "in")
+
+
+ggsave(APplot[[3]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/Diesel.png", 
+       width = 5,
+  height = 3, units = "in")
+
+
+ggsave(APplot[[4]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/ToxRel.png", 
+       width = 5,
+  height = 3, units = "in")
+
+ggsave(APplot[[5]], file= "C:/Users/dnmed/OneDrive - cumc.columbia.edu/AAMEHS/Final project/Traffic.png", 
+       width = 5,
+  height = 3, units = "in")
+
+
+```
+
+
+##Diagnostics and spatial autocorrelation 
+
+
+```{r}
+
+
+summary(APMod[[1]])
+plot(residuals(APMod[[1]]))
+hist(residuals(APMod[[1]]))
+
+
+#define neighbors
+
+dat_merge_sf<- dat_merge_sf %>% mutate(Tract= as.character(Tract))%>% 
+  mutate(ID=1:nrow(.))
+
+
+shp <- as(dat_merge_sf, "Spatial")
+
+
+
+
+#dat_merge_sf<-as(dat_merge_sf, "Spatial")
+nb <- poly2nb(shp, row.names = dat_merge_sf$ID)
+names(nb) <- attr(nb, "region.id")
+
+str(nb[1:6])
+
+t<- nb[lapply(nb, sum) > 0]
+
+
+dat_merge_sf<- dat_merge_sf%>% filter(ID %in% names(t))
+
+shp <- as(dat_merge_sf, "Spatial")
+nb <- poly2nb(shp, row.names = dat_merge_sf$ID)
+names(nb) <- attr(nb, "region.id")
+
+str(nb[1:6])
+
+
+ggplot(dat_merge_sf[c(2, 1, 3, 7, 33, 73, 76, 82, 83, 84),]) +
+  geom_sf()
+
+
+lw <- nb2listw(nb, style="W", zero.policy=TRUE)
+
+moran.test(residuals.gam(APMod[[1]], "scaled.pearson"), lw,  alternative = "greater")
+
+
+dat_merge_sf<- dat_merge_sf %>% mutate(ID=as.factor(ID))
+
+#ctrl <- gam.control(nthreads = 6) 
+modSpatial<- gam(Cardiovas~s(Arsenic)+EducatP+PovertyP+UnemplP+HousBurdP+
+                   s(ID, bs = 'mrf', k=100, xt = list(nb = nb)),  
+                 method = 'REML',
+                 data=dat_merge_sf,  family ="quasipoisson") 
+
+
+modAs<- gam(Cardiovas~s(Arsenic)+EducatP+PovertyP+UnemplP+HousBurdP,
+                 #+
+                  # s(ID, bs = 'mrf', k=1200, xt = list(nb = nb)),  
+                 method = 'REML',
+                 data=dat_merge_sf,  family ="quasipoisson") 
+  
+plot.gam(modAs)
+abline(h=0)  
+# s(ID, k=30, bs = 'mrf', xt = list(nb = nb))
+
+
+plot.gam(modSpatial)
+abline(h=0)
+
+summary(modSpatial)
+summary(APMod[[1]])
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov3000k     = predict(modSpatial, type = 'response'))
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov700k     = predict(modSpatial700, type = 'response'))
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov1000k     = predict(modSpatial, type = 'response'))
+
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov1500k     = predict(modSpatial, type = 'response'))
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov1300k     = predict(modSpatial, type = 'response'))
+
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov1200k     = predict(modSpatial, type = 'response'))
+
+
+dat_merge_sf <- transform(dat_merge_sf,
+                Cardiov100k     = predict(modSpatial, type = 'response'))
+
+
+
+
+
+
+
+dat_merge_sf<- dat_merge_sf %>% 
+  mutate(Error1000=  as.numeric(predict(modSpatial, type = 'response', se.fit = TRUE)$se.fit))
+
+
+
+dat_merge_sf<- dat_merge_sf %>% 
+  mutate(Error700=  as.numeric(predict(modSpatial700, 
+                                       type = 'response', 
+                                       se.fit = TRUE)$se.fit))
+
+
+
+dat_merge_sf<- dat_merge_sf %>% 
+  mutate(Error3000=  as.numeric(predict(modSpatial3000, 
+                                       type = 'response', 
+                                       se.fit = TRUE)$se.fit))
+
+
+v<- predict(modSpatial, type = 'response', se.fit = TRUE)$se.fit
+
+v2<- as.numeric(predict(modSpatial, type = 'response', se.fit = TRUE)$se.fit)
+
+
+a<- ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiovas), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+  
+b<- ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov700k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+
+c<- ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov1000k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+d<- ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov3000k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+
+
+
+
+e<- ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov1500k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+
+ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov1300k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+
+ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov1200k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Cardiov100k), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+  
+ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Error700), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+
+ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Error1000), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+ggplot(dat_merge_sf) +
+  geom_sf(aes(fill = Error3000), color = NA)+
+  scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
+  
+
+
+
+library(ggpubr)
+
+
+ggarrange(a, b, c, d, ncol = 2, nrow = 2)
+
+
+setwd("C:/Users/dnmed/Documents/GitHub")
+
+
+modSpatial1300<- modSpatial
+
+
+save(modSpatial1300, file = "modSpatial1300.Rdata")
+
+load("modSpatial.Rdata")
+
+
+lw <- nb2listw(nb, style="W", zero.policy=TRUE)
+
+moran.test(residuals.gam(modSpatial, "scaled.pearson"), lw,  alternative = "greater")
+
+
+
+
+dat_polys<- st_as_text(dat_merge_sf$geometry)
+
+```
+
+
+

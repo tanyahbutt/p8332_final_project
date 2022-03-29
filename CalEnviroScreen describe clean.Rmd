@@ -271,53 +271,57 @@ corrplot.mixed(corCVDcovars, lower.col = "black")
 
 ## Maps
 
-Note, census tracts are condensed in southern CA and therefore distributions in this region are not visible. We will work to refine these maps if used in the final project 
-
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=7}
 
 #Ozone, PM2_5, DieselPM, Tox_Rel, Traffic
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Ozone))+
+  geom_sf(aes(fill = Ozone), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
-  
+
+```
+
+
+\pagebreak
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=7}
 
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = PM2_5))+
+  geom_sf(aes(fill = PM2_5), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = DieselPM))+
+  geom_sf(aes(fill = DieselPM), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Tox_Rel))+
+  geom_sf(aes(fill = Tox_Rel), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Traffic))+
+  geom_sf(aes(fill = Traffic), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
 #Arsenic, Uranium, Cadmium, Lead_water 
 
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Arsenic))+
+  geom_sf(aes(fill = Arsenic), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Uranium))+
+  geom_sf(aes(fill = Uranium), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Cadmium))+
+  geom_sf(aes(fill = Cadmium), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Lead.y))+
+  geom_sf(aes(fill = Lead.y), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 
 ggplot(dat_merge_sf) +
-  geom_sf(aes(fill = Cardiovas))+
+  geom_sf(aes(fill = Cardiovas), color = NA)+
   scale_fill_gradientn(colours=rev(magma(6)), trans="sqrt")
   
 
