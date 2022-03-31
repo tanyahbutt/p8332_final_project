@@ -1,0 +1,444 @@
+---
+title: "Quant_reg"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(readr)
+library(dplyr) 
+library(quantreg)
+library(ggplot2)
+library(tidyverse)
+getwd()
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+options(
+  ggplot2.continuous.colour = "viridis",
+
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+```
+
+## Read in Cal EnviroScreen Data
+```{r}
+air_pollution_data = read_csv(file = "/Users/tanyabutt/Desktop/p8332_adv_methods_proj/p8332_final_project/dat_complete.csv") 
+``` 
+
+```{r}
+#Loading Data
+air_pollution_data = janitor::clean_names(air_pollution_data)
+
+skimr::skim(air_pollution_data)
+
+CA.median <- quantile(air_pollution_data$pm2_5, 0.5)
+CA.q1q2q3 <- quantile(air_pollution_data$pm2_5, c(0.25, 0.5, 0.75))
+
+CA.Mean <- mean(air_pollution_data$pm2_5)
+
+# Does the distribution of cardiovascular disease rate vary by annual PM2.5? 
+#    Does the central tendency (median) vary by annual PM2.5? 
+#    How does PM2.5 affect other aspects of the distribution 
+#    (e.g., 99th percentile)
+
+####*************************
+#### 5: Fit Median Model ####
+####*************************
+
+# 5a  median model 
+### outcome - Census tract level cardiovascular disease rate
+# the parameter tau is the quantile(s) to be estimated 
+# median is 50th percentile, so tau = 0.5
+
+Mod50th <- rq(cardiovas ~ pm2_5 + educatn + poverty + unempl
+              + hous_burd, data = air_pollution_data, tau = 0.5)
+
+summary(Mod50th, alpha = 0.05)
+
+Coeff.Mod50th <- summary(Mod50th, alpha = 0.05)$coefficients
+
+Coeff.Mod50th.PM2.5 <- Coeff.Mod50th[2,1:3]
+print(paste0("Association for PM2.5 and 50th percentile BMI: ", 
+             round(Coeff.Mod50th.PM2.5[1], 3), " 95% CI: (",
+             round(Coeff.Mod50th.PM2.5[2], 3), ", ", 
+             round(Coeff.Mod50th.PM2.5[3], 3), ")"))
+```
+
+```{r}
+# 5c Compare estimate of association for mean aveCVD
+# 5c.i Fit mean model
+ModMean <- lm(cardiovas ~ pm2_5 + educatn + poverty + unempl
+              + hous_burd, data = air_pollution_data)
+
+# 5c.ii Create table of coefficients from both models
+
+coeff.table  <- data.frame(Fit.Mod50th = summary(Mod50th)$coefficients[,1],
+                           Fit.ModMean = summary(ModMean)$coefficients[,1])
+
+# 5c.iii Make a table of percent differences
+
+coeff.table <- coeff.table %>% 
+  #compute percentage difference
+  mutate(PercentDiff = 100*(Fit.Mod50th - Fit.ModMean)/Fit.ModMean) %>% 
+  # round numbers 
+  mutate(Fit.Mod50th   = round(Fit.Mod50th, 3), 
+         Fit.ModMean = round(Fit.ModMean, 3),
+         PercentDiff   = round(PercentDiff, 1))
+
+coeff.table
+
+# Calculate confidence interval for coefficient from mean model 
+
+Coeff.ModMean.PM2.5 <- summary(ModMean)$coefficients[2,]
+ModMean.Beta.pm.fit <- summary(ModMean)$coefficients[2,1]
+ModMean.Beta.pm.se  <- summary(ModMean)$coefficients[2,2]
+ModMean.Beta.pm.lci <- ModMean.Beta.pm.fit - 1.96 * ModMean.Beta.pm.se
+ModMean.Beta.pm.uci <- ModMean.Beta.pm.fit + 1.96 * ModMean.Beta.pm.se
+
+print(paste0("Association for PM2.5 and Mean CVD: ", 
+             round(ModMean.Beta.pm.fit, 3), " 95% CI: (",
+             round(ModMean.Beta.pm.lci, 3), ", ", 
+             round(ModMean.Beta.pm.uci, 3), ")"))
+print(paste0("Association for PM2.5 and 50th percentile CVD: ", 
+             round(Coeff.Mod50th.PM2.5[1], 3), " 95% CI: (",
+             round(Coeff.Mod50th.PM2.5[2], 3), ", ", 
+             round(Coeff.Mod50th.PM2.5[3], 3), ")"))
+```
+
+```{r}
+# 5d Visually compare coefficients
+# for these plots, we will use ggplot2 
+
+# 5d.i Combine estimates from each model into a single dataframe 
+# assemble estimates from each Model
+# note that the code here is different for the rq model and the lm Model 
+# since the summary.rq() directly outputs confidence intervals 
+# and summary.lm outputs standard errors.
+
+# create dataframe 
+
+coeff.table <- data.frame(
+  ModelName = c("Mean Model", "Median Model"), 
+  coeff = c(ModMean.Beta.pm.fit, Coeff.Mod50th.PM2.5[1]), 
+  lci = c(ModMean.Beta.pm.lci, Coeff.Mod50th.PM2.5[2]), 
+  uci = c(ModMean.Beta.pm.uci, Coeff.Mod50th.PM2.5[3]) )
+```
+
+```{r}
+# 5d.ii Forest plot
+# with ggplot, we can keep our plot in the environment
+# as a gpglot object 
+# and then display it in the plot panel 
+# by entering the plot's name
+             
+ForestPlotMeanMedian <- ggplot(data = coeff.table, 
+            # defines what dataset ggplot will use    
+  # aes() defines which variables the geoms will use   
+  aes( # defines variable for the x axis
+      x = ModelName,  
+      # defines the variable for the point along the y axis
+      y = coeff,      
+      # defines the lower bound of the confidence interval
+      ymin = lci,     
+      # define the upper bound of the confidence interval 
+      ymax = uci)) +  
+  # creates a point (y) with line defined by ymin and ymax
+  geom_pointrange() +   
+  # creates lines with bars, i.e. here the CIs
+  geom_errorbar()+      
+  # add a dashed line at y=0
+  geom_hline(aes(yintercept = 0.0), lty = 2) +
+  # labels for axes
+  xlab("Model Name") +    
+  ylab(expression("Coefficient for PM"[2.5]~" (95% CI)"))
+
+ForestPlotMeanMedian # produces the plot in the plots panel
+
+```
+
+```{r}
+# 6a Two tau's 
+# the quantreg package incldues a way to estimate 
+# Models for multiple tau's at once 
+# we create a vector of the tau's
+
+Mods25.50 <- rq(cardiovas ~ pm2_5 + educatn + poverty + unempl
+              + hous_burd, data = air_pollution_data, tau = c(0.25, 0.50)) # c() creates a vector
+
+summary(Mods25.50)
+
+# 6b Combine estimates from each model into a single dataframe 
+# assemble estimates from each model
+# we will save the summary as an object 
+# so we do not have to keep re-summarizing the models. 
+
+summary25.50 <- summary(Mods25.50, alpha = 0.05)
+
+# we use the brackets to specify which model we are extracting
+
+Model25th   <- c(summary25.50[[1]]$coefficients[2,1:3])
+Model50th   <- c(summary25.50[[2]]$coefficients[2,1:3])
+print(paste0("Association for PM2.5 and 25th percentile CVD: ", 
+             round(Model25th[1], 3), " 95% CI: (",
+             round(Model25th[2], 3), ", ", round(Model25th[3], 3), ")"))
+print(paste0("Association for PM2.5 and 50th percentile CVD: ", 
+             round(Model50th[1], 3), " 95% CI: (",
+             round(Model50th[2], 3), ", ", round(Model50th[3], 3), ")"))
+
+##** Class Question 4 **##
+# Is the association between PM2.5 and the 25th percentile of BMI 
+# the same as the association for the 50th percentile?
+##*****************************************************************## 
+
+# 6b Plot two quantile models 
+
+# create dataframe 
+
+coeff.table <- rbind(Model25th, Model50th)
+coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE)
+
+# set names for dataframe
+
+names(coeff.table) <- c("coeff", "lci", "uci")
+coeff.table        <- coeff.table %>% 
+                      mutate(ModelName = c("Model 25th", "Model 50th")) 
+
+# 6b.ii Plot
+
+ForestPlot.25.50 <- ggplot(data=coeff.table, # defines what dataset we are using
+             aes(x = ModelName,  # defines variable for the x axis
+                 y = coeff,      # defines the variable for the point along the y axis
+                 ymin = lci,     # defines the lower bound of the confidence interval
+                 ymax = uci)) +  # define the upper bound of the confidence interval   
+  geom_pointrange() +          # creates a point (y) with line defined by ymin and ymax        
+  geom_errorbar() +             # creates lines with bars
+  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
+  xlab("Model Name") +         # labels for axes
+  ylab(expression("Coefficient for PM"[2.5]~" (95% CI)"))
+
+ForestPlot.25.50
+```
+
+```{r}
+# 6c Plot Multiple Quantiles
+# we can just use the same procedure as before, 
+# but with additional models for every quantile of interest
+
+# 6c.i Create the models
+# seq() creates a sequence with intervals set by the by arguement 
+
+TauList <- seq(0.1, 0.9, by = 0.1)
+TauList
+
+qr.Mods  <- rq(cardiovas ~ pm2_5 + educatn + poverty + unempl
+              + hous_burd, data = air_pollution_data, tau = TauList)
+
+# 6c.ii Assemble estimates from each model
+
+summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
+
+Model10th   <- c(summary.qr.Mods[[1]]$coefficients[2,1:3])
+Model20th   <- c(summary.qr.Mods[[2]]$coefficients[2,1:3])
+Model30th   <- c(summary.qr.Mods[[3]]$coefficients[2,1:3])
+Model40th   <- c(summary.qr.Mods[[4]]$coefficients[2,1:3])
+Model50th   <- c(summary.qr.Mods[[5]]$coefficients[2,1:3])
+Model60th   <- c(summary.qr.Mods[[6]]$coefficients[2,1:3])
+Model70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
+Model80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
+Model90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
+
+# create dataframe 
+
+coeff.table <- rbind(Model10th, Model20th, Model30th, Model40th, 
+                     Model50th, Model60th, Model70th, Model80th, 
+                     Model90th)
+
+coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE)
+
+# set names for dataframe
+
+names(coeff.table) <- c("coeff", "lci", "uci")
+coeff.table        <- coeff.table %>% 
+          mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
+                               "70th", "80th", "90th"))
+
+# 6b.ii Plot
+
+ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
+                  aes(x=ModelName,  # defines variable for the x axis
+                      y=coeff,      # defines the variable for the point along the y axis
+                      ymin=lci,     # defines the lower bound of the confidence interval
+                      ymax=uci)) +  # define the upper bound of the confidence interval   
+  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
+  geom_errorbar()+                  # creates lines with bars
+  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
+  xlab("CVD Quantile") +              # labels for axes
+  ylab(expression("Coefficient for PM"[2.5]~" (95% CI)"))
+
+ForestPlot.Mods
+```
+
+```{r}
+# More ggplot2 options
+# there are many parts of the plot you can specify 
+# if you don't like the defaults 
+# check the ggplot cheatsheet or just look online 
+# for help 
+# here is just some example code. 
+
+ForestPlot.fancy <- ggplot(data=coeff.table, 
+             # tell geom_functions which variables to use
+             aes(x=ModelName, y=coeff, ymin=lci, ymax=uci)) + 
+  # point is a diamond , increase size 
+  geom_pointrange(shape = 18, size = 1.5) +       
+  # increase the size of the error bars
+  geom_errorbar(size = 1.5)+ 
+  # changes the color of the line
+  geom_hline(aes(yintercept=0.0), lty=2, color ="grey") + 
+  # flip coordinates (puts labels on y axis)
+  coord_flip() +                                     
+  xlab("Model\nName") + ylab(expression("Coefficient for PM"[2.5]~" (95% CI)")) +
+  # change the angle of the title of the y-axis
+  theme(axis.title.y = element_text(angle = 0, vjust = 0.5)) +  
+  # change the size of the axis titles
+  theme(axis.title = element_text(size = 28)) +                 
+  # change the size of the axis text
+  theme(axis.text = element_text(size = 20)) +      
+  # use a white background without gridlines
+  theme(panel.background = element_rect(fill = 'white', color = "black")) 
+
+ForestPlot.fancy
+
+####****************************************************
+#### Footnote 3: Interactions in Linear Regression  ####
+####****************************************************
+
+# Does the association between county-level annual PM2.5 and county average BMI 
+# vary by climate region? 
+# Let's add an interaction term 
+
+# F3a Fit regression model 
+
+mod.interaction <- lm(cardiovas ~ pm2_5*poverty +pm2_5 + educatn + poverty + unempl + hous_burd , data = air_pollution_data ,na.action = na.omit)
+# F3b Review Model  
+
+summary(mod.interaction)
+
+# We see that the term for pm*upper_midwest is almost significant 
+# We can use the values from the model to estimate 
+# the PM-AveBMI association within the  Upper Midwest
+# and to estimate the confidence intervals of the association 
+
+# F3c Compute the within-region association and its uncertainty 
+
+# F3.i Extract coefficents and covariances
+# here we create tables of coefficients and covariance
+coef.mat <- summary(mod.interaction)$coefficients
+var.mat  <- vcov(mod.interaction)
+
+# F3.ii Compute total term for within-region association
+# sum of the term in the reference region plus the term for Upper Midwest
+
+beta.PM_upper_midwest <- coef.mat["AvePM",1] + 
+  coef.mat["AvePM:ClimateRegionupper_midwest",1]
+
+# F3.iii Compute variance of within-region association 
+# in order to compute standard error
+# We must compute the variance for the total term 
+# Var(Beta1 + Beta3) = Var(Beta1) + Var(Beta3) + CoVar(Beta1, Beta3) + CoVar(Beta3, Beta1)
+# Var(Beta1 + Beta3) = Var(Beta1) + Var(Beta3) + 2*CoVar(Beta1, Beta3) 
+
+var.PM_upper_midwest  <- var.mat["AvePM", "AvePM"] + 
+  var.mat["AvePM:ClimateRegionupper_midwest", "AvePM:ClimateRegionupper_midwest"] +
+  2*var.mat["AvePM", "AvePM:ClimateRegionupper_midwest"]
+
+se.PM_upper_midwest  <- sqrt(abs(var.PM_upper_midwest))
+
+# F3.iv Compute confidence intervals 
+# using ste for within-region association
+
+lci.PM_upper_midwest <- beta.PM_upper_midwest - 1.96*se.PM_upper_midwest
+uci.PM_upper_midwest <- beta.PM_upper_midwest + 1.96*se.PM_upper_midwest
+
+UMWval <- paste(round(beta.PM_upper_midwest, 3), " (95% CI: ", round(lci.PM_upper_midwest, 3), ", ", 
+                round(uci.PM_upper_midwest, 3), ")", sep = "")
+UMWval
+
+# F3.v Assess model fit
+# we can ask whether including the interaction terms improved model fit 
+# anova() provides a nice test comparing model fit
+
+mod.noInteraction <- lm(cardiovas ~ pm2_5 + educatn + poverty + unempl
+              + hous_burd, data = air_pollution_data, na.action = na.omit)
+
+anova(mod.noInteraction, mod.interaction)
+
+# the results of the anova are not statistically significant, 
+# indicating that as a whole interaction between pm and region does not improve model fit
+# i.e. no evidence of effect modification by region
+```
+
+```{r}
+# 6c Plot Multiple Quantiles
+# we can just use the same procedure as before, 
+# but with additional models for every quantile of interest
+
+# 6c.i Create the models
+# seq() creates a sequence with intervals set by the by arguement 
+
+TauList <- seq(0.1, 0.9, by = 0.1)
+TauList
+
+qr.Mods  <- rq(cardiovas ~ cadmium + educatn + poverty + unempl
+              + hous_burd, data = air_pollution_data, tau = TauList)
+
+# 6c.ii Assemble estimates from each model
+
+summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
+
+Model10th   <- c(summary.qr.Mods[[1]]$coefficients[2,1:3])
+Model20th   <- c(summary.qr.Mods[[2]]$coefficients[2,1:3])
+Model30th   <- c(summary.qr.Mods[[3]]$coefficients[2,1:3])
+Model40th   <- c(summary.qr.Mods[[4]]$coefficients[2,1:3])
+Model50th   <- c(summary.qr.Mods[[5]]$coefficients[2,1:3])
+Model60th   <- c(summary.qr.Mods[[6]]$coefficients[2,1:3])
+Model70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
+Model80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
+Model90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
+
+# create dataframe 
+
+coeff.table <- rbind(Model10th, Model20th, Model30th, Model40th, 
+                     Model50th, Model60th, Model70th, Model80th, 
+                     Model90th)
+
+coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE)
+
+# set names for dataframe
+
+names(coeff.table) <- c("coeff", "lci", "uci")
+coeff.table        <- coeff.table %>% 
+          mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
+                               "70th", "80th", "90th"))
+
+# 6b.ii Plot
+
+ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
+                  aes(x=ModelName,  # defines variable for the x axis
+                      y=coeff,      # defines the variable for the point along the y axis
+                      ymin=lci,     # defines the lower bound of the confidence interval
+                      ymax=uci)) +  # define the upper bound of the confidence interval   
+  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
+  geom_errorbar()+                  # creates lines with bars
+  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
+  xlab("CVD Quantile") +              # labels for axes
+  ylab(expression("Coefficient for Cadmium" (95% CI)"))
+
+ForestPlot.Mods
+```
+
