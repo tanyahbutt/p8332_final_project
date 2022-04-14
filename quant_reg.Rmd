@@ -28,24 +28,16 @@ scale_fill_discrete = scale_fill_viridis_d
 ## Read in Cal EnviroScreen Data
 ```{r}
 air_pollution_data = read_csv(file = "/Users/tanyabutt/Desktop/p8332_adv_methods_proj/p8332_final_project/dat_complete.csv") 
+
+air_pollution_data = janitor::clean_names(air_pollution_data) %>% 
+  mutate(asln=ifelse(arsenic==0, log(0.01), log(arsenic)), 
+                                       uln=ifelse(uranium==0, log(0.01), log(uranium)))
 ``` 
 
 ```{r}
-#Loading Data
-air_pollution_data = janitor::clean_names(air_pollution_data)
-
-# Does the distribution of cardiovascular disease rate vary by annual PM2.5? 
-#    Does the central tendency (median) vary by annual PM2.5? 
-#    How does PM2.5 affect other aspects of the distribution 
-#    (e.g., 99th percentile)
-
-####*************************
-#### 5: Fit Median Model ####
-####*************************
-
-# 5a  median model 
-### outcome - Census tract level cardiovascular disease hospitalization rate
-# the parameter tau is the quantile(s) to be estimated 
+# Does the central tendency (median) vary by annual PM2.5? 
+# Median Model 
+### Outcome - Census tract level cardiovascular disease hospitalization rate
 # median is 50th percentile, so tau = 0.5
 
 Mod50th <- rq(cardiovas ~ pm2_5 + educatn + poverty + unempl
@@ -63,17 +55,12 @@ print(paste0("Association for PM2.5 and 50th percentile CVD Hospitalization: ",
 ```
 
 ```{r}
-# 5c Compare estimate of association for mean aveCVD hospitalization
-# 5c.i Fit mean model
+# Mean Model w/ PM2.5
 ModMean <- lm(cardiovas ~ pm2_5 + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data)
 
-# 5c.ii Create table of coefficients from both models
-
 coeff.table  <- data.frame(Fit.Mod50th = summary(Mod50th)$coefficients[,1],
                            Fit.ModMean = summary(ModMean)$coefficients[,1])
-
-# 5c.iii Make a table of percent differences
 
 coeff.table <- coeff.table %>% 
   #compute percentage difference
@@ -84,8 +71,6 @@ coeff.table <- coeff.table %>%
          PercentDiff   = round(PercentDiff, 1))
 
 coeff.table
-
-# Calculate confidence interval for coefficient from mean model 
 
 Coeff.ModMean.PM2.5 <- summary(ModMean)$coefficients[2,]
 ModMean.Beta.pm.fit <- summary(ModMean)$coefficients[2,1]
@@ -104,17 +89,8 @@ print(paste0("Association for PM2.5 and 50th percentile CVD Hospitalization Rate
 ```
 
 ```{r}
-# 5d Visually compare coefficients
-# for these plots, we will use ggplot2 
-
-# 5d.i Combine estimates from each model into a single dataframe 
-# assemble estimates from each Model
-# note that the code here is different for the rq model and the lm Model 
-# since the summary.rq() directly outputs confidence intervals 
-# and summary.lm outputs standard errors.
-
-# create dataframe 
-
+# Combining estimates from mean and median model into single data frame
+# Visualizing results
 coeff.table <- data.frame(
   ModelName = c("Mean Model", "Median Model"), 
   coeff = c(ModMean.Beta.pm.fit, Coeff.Mod50th.PM2.5[1]), 
@@ -122,116 +98,29 @@ coeff.table <- data.frame(
   uci = c(ModMean.Beta.pm.uci, Coeff.Mod50th.PM2.5[3]) )
 
 coeff.table
-```
 
-```{r}
-# 5d.ii Forest plot
-# with ggplot, we can keep our plot in the environment
-# as a gpglot object 
-# and then display it in the plot panel 
-# by entering the plot's name
-             
 ForestPlotMeanMedian <- ggplot(data = coeff.table, 
-            # defines what dataset ggplot will use    
-  # aes() defines which variables the geoms will use   
-  aes( # defines variable for the x axis
+  aes( 
       x = ModelName,  
-      # defines the variable for the point along the y axis
       y = coeff,      
-      # defines the lower bound of the confidence interval
       ymin = lci,     
-      # define the upper bound of the confidence interval 
       ymax = uci)) +  
-  # creates a point (y) with line defined by ymin and ymax
   geom_pointrange() +   
-  # creates lines with bars, i.e. here the CIs
-  geom_errorbar()+      
-  # add a dashed line at y=0
+  geom_errorbar() +      
   geom_hline(aes(yintercept = 0.0), lty = 2) +
-  # labels for axes
   xlab("Model Name") +    
   ylab(expression("Coefficient for PM"[2.5]~" (95% CI)"))
 
-ForestPlotMeanMedian # produces the plot in the plots panel
+ForestPlotMeanMedian
 ```
 
 ```{r}
-# 6a Two tau's - Pm2.5
-# the quantreg package incldues a way to estimate 
-# Models for multiple tau's at once 
-# we create a vector of the tau's
-
-Mods25.50 <- rq(cardiovas ~ pm2_5 + educatn + poverty + unempl
-              + hous_burd, data = air_pollution_data, tau = c(0.25, 0.50)) # c() creates a vector
-
-summary(Mods25.50)
-
-# 6b Combine estimates from each model into a single dataframe 
-# assemble estimates from each model
-# we will save the summary as an object 
-# so we do not have to keep re-summarizing the models. 
-
-summary25.50 <- summary(Mods25.50, alpha = 0.05)
-
-# we use the brackets to specify which model we are extracting
-
-Model_25th   <- c(summary25.50[[1]]$coefficients[2,1:3])
-Model_50th   <- c(summary25.50[[2]]$coefficients[2,1:3])
-print(paste0("Association for PM2.5 and 25th percentile CVD Hosptialization Rate: ", 
-             round(Model_25th[1], 3), " 95% CI: (",
-             round(Model_25th[2], 3), ", ", round(Model_25th[3], 3), ")"))
-print(paste0("Association for PM2.5 and 50th percentile CVD Hospitalization Rate: ", 
-             round(Model_50th[1], 3), " 95% CI: (",
-             round(Model_50th[2], 3), ", ", round(Model_50th[3], 3), ")"))
-
-##** Class Question 4 **##
-# Is the association between PM2.5 and the 25th percentile of BMI 
-# the same as the association for the 50th percentile?
-##*****************************************************************## 
-
-# 6b Plot two quantile models 
-
-# create dataframe 
-
-coeff.table <- rbind(Model_25th, Model_50th)
-coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
-
-names(coeff.table) <- c("coeff", "lci", "uci")
-coeff.table        <- coeff.table %>% 
-                      mutate(ModelName = c("Model 25th", "Model 50th")) 
-
-# 6b.ii Plot
-
-ForestPlot.25.50 <- ggplot(data=coeff.table, # defines what dataset we are using
-             aes(x = ModelName,  # defines variable for the x axis
-                 y = coeff,      # defines the variable for the point along the y axis
-                 ymin = lci,     # defines the lower bound of the confidence interval
-                 ymax = uci)) +  # define the upper bound of the confidence interval   
-  geom_pointrange() +          # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar() +             # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("Model Name") +         # labels for axes
-  ylab(expression("Coefficient for PM"[2.5]~" (95% CI)"))
-
-ForestPlot.25.50
-```
-
-```{r}
-# 6c Multiple Quantiles- PM2.5
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
-
+# Multiple Quantiles- PM2.5
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ pm2_5 + educatn + poverty + unempl
-              + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
+qr.Mods  <- rq(cardiovas ~ log(pm2_5) + educat_p + poverty_p + unempl_p
+              + hous_burd_p, data = air_pollution_data, tau = TauList)
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -245,51 +134,39 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar() +                 
+  geom_hline(aes(yintercept = 0.0), lty = 2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for PM"[2.5]~" (95% CI)"))
 
 ForestPlot.Mods
 ```
 
-```{r, eval=false}
-# 6c Plot Multiple Quantiles - Tox Release
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
+```{r}
+# Multiple Quantiles - Tox Release
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ tox_rel + educatn + poverty + unempl
-              + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
+qr.Mods  <- rq(cardiovas ~ log(tox_rel) + educat_p + poverty_p + unempl_p
+              + hous_burd_p, data = air_pollution_data, tau = TauList)
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -303,31 +180,26 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Toxic Release (95% CI)"))
 
 ForestPlot.Mods
@@ -335,19 +207,12 @@ ForestPlot.Mods
 
 ```{r, eval=false}
 # 6c Plot Multiple Quantiles - Ozone
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ ozone + educatn + poverty + unempl
-              + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
+qr.Mods  <- rq(cardiovas ~ log(ozone) + educat_p + poverty_p + unempl_p
+              + hous_burd_p, data = air_pollution_data, tau = TauList)
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -361,52 +226,39 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Ozone (95% CI)"))
 
 ForestPlot.Mods
 ```
 
-
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - Diesel PM
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ diesel_pm + educatn + poverty + unempl
+qr.Mods  <- rq(cardiovas ~ log(diesel_pm) + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -420,51 +272,39 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Diesel PM (95% CI)"))
 
 ForestPlot.Mods
 ```
 
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - Traffic
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ traffic + educatn + poverty + unempl
+qr.Mods  <- rq(cardiovas ~ log(traffic) + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -478,51 +318,39 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Traffic (95% CI)"))
 
 ForestPlot.Mods
 ```
 
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - pesticides
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ pesticide + educatn + poverty + unempl
+qr.Mods  <- rq(cardiovas ~ log(pesticide) + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -536,52 +364,40 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
-  ylab(expression("Coefficient for Pesticides (95% CI)"))
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
+  ylab(expression("Coefficient for Presticides (95% CI)"))
 
 ForestPlot.Mods
 ```
 
 
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - arsenic
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ arsenic + educatn + poverty + unempl
+qr.Mods  <- rq(cardiovas ~ asln + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -595,44 +411,34 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Arsenic (95% CI)"))
 
 ForestPlot.Mods
 ```
 
 
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - cadmium
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
@@ -640,8 +446,6 @@ TauList
 qr.Mods  <- rq(cardiovas ~ cadmium + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
 
-# 6c.ii Assemble estimates from each model
-
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
 Model_10th   <- c(summary.qr.Mods[[1]]$coefficients[2,1:3])
@@ -654,52 +458,39 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Cadmium (95% CI)"))
 
 ForestPlot.Mods
 ```
 
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - lead
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
-
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
 qr.Mods  <- rq(cardiovas ~ lead + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
 
-# 6c.ii Assemble estimates from each model
-
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
 Model_10th   <- c(summary.qr.Mods[[1]]$coefficients[2,1:3])
@@ -712,44 +503,34 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Lead (95% CI)"))
 
 ForestPlot.Mods
 ```
 
 
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - nitrate
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
 
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
@@ -757,8 +538,6 @@ TauList
 qr.Mods  <- rq(cardiovas ~ nitrate + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
 
-# 6c.ii Assemble estimates from each model
-
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
 Model_10th   <- c(summary.qr.Mods[[1]]$coefficients[2,1:3])
@@ -771,52 +550,38 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Nitrate (95% CI)"))
 
 ForestPlot.Mods
 ```
 
-
-```{r, eval=false}
+```{r}
 # 6c Plot Multiple Quantiles - uranium
-# we can just use the same procedure as before, 
-# but with additional models for every quantile of interest
-
-# 6c.i Create the models
-# seq() creates a sequence with intervals set by the by arguement 
-
 TauList <- seq(0.1, 0.9, by = 0.1)
 TauList
 
-qr.Mods  <- rq(cardiovas ~ uranium + educatn + poverty + unempl
+qr.Mods  <- rq(cardiovas ~ uln + educatn + poverty + unempl
               + hous_burd, data = air_pollution_data, tau = TauList)
-
-# 6c.ii Assemble estimates from each model
 
 summary.qr.Mods <- summary(qr.Mods, alpha = 0.05)
 
@@ -830,31 +595,26 @@ Model_70th   <- c(summary.qr.Mods[[7]]$coefficients[2,1:3])
 Model_80th   <- c(summary.qr.Mods[[8]]$coefficients[2,1:3])
 Model_90th   <- c(summary.qr.Mods[[9]]$coefficients[2,1:3])
 
-# create dataframe 
-
 coeff.table <- rbind(Model_10th, Model_20th, Model_30th, Model_40th, 
                      Model_50th, Model_60th, Model_70th, Model_80th, 
                      Model_90th)
 
 coeff.table <- as.data.frame(coeff.table, stringsAsFactors = FALSE) 
-# set names for dataframe
 
 names(coeff.table) <- c("coeff", "lci", "uci")
 coeff.table        <- coeff.table %>% 
           mutate(ModelName = c("10th", "20th", "30th", "40th","50th", "60th", 
                                "70th", "80th", "90th"))
 
-# 6b.ii Plot
-
-ForestPlot.Mods <- ggplot(data=coeff.table, # defines what dataset we are using
-                  aes(x=ModelName,  # defines variable for the x axis
-                      y=coeff,      # defines the variable for the point along the y axis
-                      ymin=lci,     # defines the lower bound of the confidence interval
-                      ymax=uci)) + # define the upper bound of the confidence interval 
-  geom_pointrange() +               # creates a point (y) with line defined by ymin and ymax        
-  geom_errorbar()+                  # creates lines with bars
-  geom_hline(aes(yintercept=0.0), lty=2) + # add a dashed line at y=0 
-  xlab("CVD Quantile") +              # labels for axes
+ForestPlot.Mods <- ggplot(data=coeff.table, 
+                  aes(x=ModelName,  
+                      y=coeff,      
+                      ymin=lci,     
+                      ymax=uci)) + 
+  geom_pointrange() +                       
+  geom_errorbar()+                 
+  geom_hline(aes(yintercept=0.0), lty=2) + 
+  xlab("CVD Quantile") +              
   ylab(expression("Coefficient for Uranium (95% CI)"))
 
 ForestPlot.Mods
